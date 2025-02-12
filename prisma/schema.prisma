@@ -1,0 +1,285 @@
+// prisma/schema.prisma
+
+// ------------------------------
+// Generator and Datasource
+// ------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ------------------------------
+// Core Models (Unchanged or minimally changed)
+// ------------------------------
+
+model User {
+  id            String          @id @default(cuid())
+  firstName     String?
+  secondName    String?
+  address       String?
+  email         String          @unique
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+  Authenticator Authenticator[]
+  invoices      Invoice[]
+  ownedBusiness Business? @relation("OwnedBusiness")
+  Note          Note[]
+  Todo          Todo[]
+  Stock         Stock[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+// Optional for WebAuthn support
+model Authenticator {
+  credentialID         String  @unique
+  userId               String
+  providerAccountId    String
+  credentialPublicKey  String
+  counter              Int
+  credentialDeviceType String
+  credentialBackedUp   Boolean
+  transports           String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, credentialID])
+}
+
+// ------------------------------
+// Business & Organizational Models
+// ------------------------------
+
+model Business {
+  id                String   @id @default(cuid())
+  businessType      String?
+  businessName      String?
+  businessAddress   String?
+  businessPhone     String?
+  businessEmail     String?
+  businessEIN       String?  // Employer Identification Number
+  businessVAT       String?  // VAT Number
+  businessLogo      String?
+  returnPolicy      String?
+
+  // Define a one-to-one relation with the User who is the owner.
+  // Specify the foreign key on this side only and give the relation a name.
+  ownerId String @unique
+  owner   User   @relation("OwnedBusiness", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // A Business can have many employees.
+  employees Employee[]
+
+  // A Business can have many invoices.
+  invoices  Invoice[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  EmployeeInvitation EmployeeInvitation[]
+}
+
+/// Define roles for employees to control permissions within the organization.
+enum EmployeeRole {
+  SUPER_ADMIN
+  ADMIN
+  DATABASE_ADMIN
+  SALES
+  HRM
+}
+
+/// The Employee model holds organizational details such as name, address,
+/// the last four digits of the SSN, salary, working hours, attendance, and role.
+model Employee {
+  id           String       @id @default(cuid())
+  firstName    String
+  lastName     String
+  address      String?
+  ssn          String?      // Store only the last four digits
+  salary       Float?       // Optional salary field
+  workingHours Int?         // e.g., number of hours per week
+  attendance   Int?         // e.g., total number of days attended; further granularity can be added if needed
+
+  role         EmployeeRole @default(SALES)
+
+  // Link each employee to the Business that employs them.
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  businessId String
+
+  // An employee can be related to many invoices (for example, as the sales representative).
+  invoices Invoice[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ------------------------------
+// Note, Todo, and Stock Models (Remain Unchanged)
+// ------------------------------
+
+model Note {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Todo {
+  id        String   @id @default(cuid())
+  title     String
+  content   String?
+  completed Boolean  @default(false) // Track if the task is completed
+  userId    String // Foreign key to associate Todo with a User
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Stock {
+  id            String   @id @default(uuid())
+  stockBarcode  String   // Required field for stock ID
+  stockName     String   // Required field for stock name
+  category      String?
+  subCategory   String?
+  status        String?
+  quantity      Int?
+  stockRate     Float?
+  sellingRate   Float?
+  supplier      String?
+  purchaseDate  DateTime?
+  expiryDate    DateTime?
+  stockLocation String?
+  discountAllowed Boolean? @default(false)
+  VAT           Float?
+  SKU           String   @unique // Required field for SKU
+
+  // The Stock model still links to a User.
+  // To associate stocks with a Business, you can filter by the User’s ownedBusiness.
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ------------------------------
+// Invoice & InvoiceItem Models (with Organizational Enhancements)
+// ------------------------------
+
+model Invoice {
+  id            String        @id @default(uuid())
+  invoiceName   String
+  total         Float
+  status        InvoiceStatus?
+  date          DateTime
+
+  fromName      String?
+  fromEmail     String?
+  fromAddress   String?
+  clientName    String?
+  clientEmail   String?
+  clientAddress String?
+  currency      String?
+  invoiceNumber Int?
+  note          String?
+
+  // An Invoice is made up of multiple InvoiceItems.
+  invoiceItems  InvoiceItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Optional: Link an Invoice to a Business (if the sale is made on behalf of the Business)
+  businessId String?
+  business   Business? @relation(fields: [businessId], references: [id])
+
+  // Optional: Link an Invoice to an Employee (e.g., the sales representative)
+  employeeId String?
+  employee   Employee? @relation(fields: [employeeId], references: [id])
+
+  // Optional: Link an Invoice to a User.
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+}
+
+model InvoiceItem {
+  id                  String   @id @default(uuid())
+  stockid             String
+  invoiceItemQuantity Int
+  invoiceItemRate     Float
+
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+}
+
+// ------------------------------
+// Enums
+// ------------------------------
+
+enum InvoiceStatus {
+  PAID
+  PENDING
+  onHOLD
+  RETURNED
+}
+
+model EmployeeInvitation {
+  id          String   @id @default(cuid())
+  email       String   // The email address to which the invitation is sent
+  token       String   @unique  // A unique token for verifying the invitation
+  role        EmployeeRole @default(SALES) // Default role or one provided by the inviter
+  businessId  String   // The business inviting the employee
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  accepted    Boolean  @default(false)  // Has the invite been accepted?
+  expiresAt   DateTime?  // Optional expiration date for the invitation
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
