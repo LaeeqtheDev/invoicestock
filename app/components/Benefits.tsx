@@ -33,7 +33,7 @@ export function Benefits() {
         </p>
 
         <div className="mt-6 sm:mt-7">
-          <Link href={"/learn-more"}>
+          <Link href={"/login"}>
             <RainbowButton>Try Now</RainbowButton>
           </Link>
         </div>
