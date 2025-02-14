@@ -1,4 +1,3 @@
-// /dashboard/analytics/ClientAnalytics.tsx
 "use client";
 
 import React, { useState, useMemo, JSX } from "react";
@@ -27,7 +26,7 @@ ChartJS.register(
   LineElement,
   Title,
   Tooltip,
-  Legend,
+  Legend
 );
 
 // Define the props for our client component.
@@ -62,13 +61,15 @@ export default function ClientAnalytics({
     });
   }, [rawInvoices, cutoffDate]);
 
+  // For stocks, if purchaseDate is missing, fallback to createdAt.
   const filteredStocks = useMemo(() => {
     return rawStocks.filter((stock: any): boolean => {
-      if (!stock.purchaseDate) return false;
-      const stockDate: string = new Date(stock.purchaseDate)
+      const stockDate = stock.purchaseDate || stock.createdAt;
+      if (!stockDate) return false;
+      const stockDateISO: string = new Date(stockDate)
         .toISOString()
         .split("T")[0];
-      return stockDate >= cutoffDate;
+      return stockDateISO >= cutoffDate;
     });
   }, [rawStocks, cutoffDate]);
 
@@ -81,12 +82,17 @@ export default function ClientAnalytics({
     return map;
   }, [filteredStocks]);
 
-  // ---------- Compute Summary Aggregates ----------
+  // ---------- Determine Business Currency ----------
+  // Assume the business currency is from the first invoice (default to "USD")
+  const businessCurrency = useMemo(() => {
+    return rawInvoices.length && rawInvoices[0].currency
+      ? rawInvoices[0].currency
+      : "USD";
+  }, [rawInvoices]);
+
+  // ---------- Compute Summary Aggregates (for one currency) ----------
   const totalSalesFiltered = useMemo((): number => {
-    return filteredInvoices.reduce(
-      (sum: number, inv: any) => sum + inv.total,
-      0,
-    );
+    return filteredInvoices.reduce((sum: number, inv: any) => sum + inv.total, 0);
   }, [filteredInvoices]);
 
   const totalPurchasesFiltered = useMemo((): number => {
@@ -119,8 +125,8 @@ export default function ClientAnalytics({
         const qty: number = item.invoiceItemQuantity ?? 0;
         const stock = item.stockid ? filteredStockMap.get(item.stockid) : null;
         if (stock && stock.VAT) {
-          const purchaseRate: number = stock.stockRate ?? 0;
-          vat += (stock.VAT / 100) * purchaseRate * qty;
+          const rate: number = stock.stockRate ?? 0;
+          vat += (stock.VAT / 100) * rate * qty;
         }
       });
     });
@@ -157,10 +163,9 @@ export default function ClientAnalytics({
   const dayPurchasesMap = useMemo(() => {
     const map = new Map<string, number>();
     filteredStocks.forEach((stock: any) => {
-      if (stock.purchaseDate) {
-        const day: string = new Date(stock.purchaseDate)
-          .toISOString()
-          .split("T")[0];
+      const stockDate = stock.purchaseDate || stock.createdAt;
+      if (stockDate) {
+        const day: string = new Date(stockDate).toISOString().split("T")[0];
         const rate: number = stock.stockRate ?? 0;
         const qty: number = stock.quantity ?? 0;
         const vatPercent: number = stock.VAT ?? 0;
@@ -182,15 +187,15 @@ export default function ClientAnalytics({
 
   const chartDataSalesValues = useMemo(
     () => sortedDays.map((day: string) => daySalesMap.get(day) || 0),
-    [sortedDays, daySalesMap],
+    [sortedDays, daySalesMap]
   );
   const chartDataProfitValues = useMemo(
     () => sortedDays.map((day: string) => dayProfitMap.get(day) || 0),
-    [sortedDays, dayProfitMap],
+    [sortedDays, dayProfitMap]
   );
   const chartDataPurchasesValues = useMemo(
     () => sortedDays.map((day: string) => dayPurchasesMap.get(day) || 0),
-    [sortedDays, dayPurchasesMap],
+    [sortedDays, dayPurchasesMap]
   );
 
   const cumulativeSales = useMemo((): number[] => {
@@ -320,7 +325,6 @@ export default function ClientAnalytics({
       legend: {
         display: true,
         position: "top",
-        // Provide additional required properties:
         align: "center",
         fullSize: true,
         labels: {
@@ -342,111 +346,29 @@ export default function ClientAnalytics({
     }),
   };
 
-  // ---------- Additional Metrics ----------
-  const additionalMetrics = [
+  // ---------- Render Single Currency Summary Cards ----------
+  const summaryData = [
     {
-      title: "Most Selling Product",
-      value: (() => {
-        const productSalesMap = new Map<string, { totalQty: number }>();
-        filteredInvoices.forEach((inv: any) => {
-          inv.invoiceItems.forEach((item: any) => {
-            if (item.stockid && item.invoiceItemQuantity) {
-              const prev = productSalesMap.get(item.stockid) || { totalQty: 0 };
-              productSalesMap.set(item.stockid, {
-                totalQty: prev.totalQty + item.invoiceItemQuantity,
-              });
-            }
-          });
-        });
-        let mostSellingProductId: string | null = null;
-        let maxQty = -Infinity;
-        productSalesMap.forEach((value, stockid) => {
-          if (value.totalQty > maxQty) {
-            maxQty = value.totalQty;
-            mostSellingProductId = stockid;
-          }
-        });
-        if (mostSellingProductId) {
-          const stock = filteredStockMap.get(mostSellingProductId);
-          return stock ? `${stock.stockName} (${maxQty} units)` : "N/A";
-        }
-        return "N/A";
-      })(),
+      title: "Total Sales",
+      value: totalSalesFiltered,
+      currency: businessCurrency,
     },
     {
-      title: "Least Selling Product",
-      value: (() => {
-        const productSalesMap = new Map<string, { totalQty: number }>();
-        filteredInvoices.forEach((inv: any) => {
-          inv.invoiceItems.forEach((item: any) => {
-            if (item.stockid && item.invoiceItemQuantity) {
-              const prev = productSalesMap.get(item.stockid) || { totalQty: 0 };
-              productSalesMap.set(item.stockid, {
-                totalQty: prev.totalQty + item.invoiceItemQuantity,
-              });
-            }
-          });
-        });
-        let leastSellingProductId: string | null = null;
-        let minQty = Infinity;
-        productSalesMap.forEach((value, stockid) => {
-          if (value.totalQty < minQty && value.totalQty > 0) {
-            minQty = value.totalQty;
-            leastSellingProductId = stockid;
-          }
-        });
-        if (leastSellingProductId) {
-          const stock = filteredStockMap.get(leastSellingProductId);
-          return stock ? `${stock.stockName} (${minQty} units)` : "N/A";
-        }
-        return "N/A";
-      })(),
+      title: "Total Purchases",
+      value: totalPurchasesFiltered,
+      currency: businessCurrency,
     },
     {
-      title: "Best Sales Day",
-      value: (() => {
-        let bestDay = "N/A";
-        let bestAmount = 0;
-        daySalesMap.forEach((amount, day) => {
-          if (amount > bestAmount) {
-            bestAmount = amount;
-            bestDay = day;
-          }
-        });
-        return `${bestDay} (${formatCurrency({ amount: bestAmount, currency: "USD" })})`;
-      })(),
+      title: "Total Profit",
+      value: totalProfitFiltered,
+      currency: businessCurrency,
+    },
+    {
+      title: "Total VAT Collected",
+      value: totalVATFiltered,
+      currency: businessCurrency,
     },
   ];
-
-  // ---------- Group Profit by Currency ----------
-  const profitByCurr = useMemo((): Map<string, number> => {
-    const map = new Map<string, number>();
-    filteredInvoices.forEach((inv: any) => {
-      const curr: string = inv.currency || "USD";
-      inv.invoiceItems.forEach((item: any) => {
-        const qty: number = item.invoiceItemQuantity ?? 0;
-        const sellingRate: number = item.invoiceItemRate ?? 0;
-        const stock = item.stockid ? filteredStockMap.get(item.stockid) : null;
-        const purchaseRate: number = stock?.stockRate ?? 0;
-        const profit = (sellingRate - purchaseRate) * qty;
-        map.set(curr, (map.get(curr) || 0) + profit);
-      });
-    });
-    return map;
-  }, [filteredInvoices, filteredStockMap]);
-
-  const profitCards = useMemo((): JSX.Element[] => {
-    return (Array.from(profitByCurr.entries()) as [string, number][]).map(
-      ([curr, profit]: [string, number], i: number) => (
-        <div key={curr} className="border rounded p-4 shadow">
-          <h2 className="text-xl font-bold">Total Profit ({curr})</h2>
-          <p className="text-2xl">
-            {formatCurrency({ amount: profit, currency: curr as any })}
-          </p>
-        </div>
-      ),
-    );
-  }, [profitByCurr]);
 
   return (
     <div className="space-y-8 p-4">
@@ -476,28 +398,7 @@ export default function ClientAnalytics({
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          {
-            title: "Total Sales",
-            value: totalSalesFiltered,
-            currency: "USD" as const,
-          },
-          {
-            title: "Total Purchases",
-            value: totalPurchasesFiltered,
-            currency: "USD" as const,
-          },
-          {
-            title: "Total Profit",
-            value: totalProfitFiltered,
-            currency: "USD" as const,
-          },
-          {
-            title: "Total VAT Collected",
-            value: totalVATFiltered,
-            currency: "USD" as const,
-          },
-        ].map((item, i: number) => (
+        {summaryData.map((item, i: number) => (
           <motion.div
             key={i}
             custom={i}
@@ -522,7 +423,9 @@ export default function ClientAnalytics({
                   <CountUp
                     end={item.value}
                     duration={1.5}
-                    prefix={item.currency === "USD" ? "$" : ""}
+                    prefix={
+                      formatCurrency({ amount: 0, currency: item.currency }).slice(0, 1)
+                    }
                     decimals={2}
                   />
                 </p>
@@ -532,28 +435,16 @@ export default function ClientAnalytics({
         ))}
       </div>
 
-      {/* Profit Cards by Currency */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">{profitCards}</div>
+      {/* Additional Profit Card (if desired) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {additionalMetrics.map((item, i: number) => (
-          <motion.div
-            key={i}
-            custom={i}
-            initial="hidden"
-            animate="visible"
-            variants={cardVariant}
-          >
-            <Card>
-              <CardHeader>
-                <CardTitle>{item.title}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-lg">{item.value}</p>
-              </CardContent>
-            </Card>
-          </motion.div>
-        ))}
+        <div className="border rounded p-4 shadow">
+          <h2 className="text-xl font-bold">Total Profit ({businessCurrency})</h2>
+          <p className="text-2xl">
+            {formatCurrency({ amount: totalProfitFiltered, currency: businessCurrency as any })}
+          </p>
+        </div>
       </div>
+
       {/* Charts Section */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         {/* Daily Sales Trend Chart */}
@@ -569,10 +460,7 @@ export default function ClientAnalytics({
           <h2 className="text-2xl font-semibold mb-4">Daily Profit Trend</h2>
           <div
             className={`border rounded p-4 ${
-              chartDataProfit.datasets[0].data.reduce(
-                (a: number, b: number) => a + b,
-                0,
-              ) >= 0
+              chartDataProfit.datasets[0].data.reduce((a: number, b: number) => a + b, 0) >= 0
                 ? "border-green-500/50"
                 : "border-red-500/50"
             }`}
@@ -602,10 +490,7 @@ export default function ClientAnalytics({
           <h2 className="text-2xl font-semibold mb-4">Cumulative Profit</h2>
           <div
             className={`border rounded p-4 ${
-              chartDataCumulativeProfit.datasets[0].data.reduce(
-                (a: number, b: number) => a + b,
-                0,
-              ) >= 0
+              chartDataCumulativeProfit.datasets[0].data.reduce((a: number, b: number) => a + b, 0) >= 0
                 ? "border-green-500/50"
                 : "border-red-500/50"
             }`}
@@ -622,10 +507,6 @@ export default function ClientAnalytics({
           </div>
         </div>
       </div>
-
-      {/* Additional Metrics */}
     </div>
   );
 }
-
-export { ClientAnalytics };
