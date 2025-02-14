@@ -1,14 +1,40 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { motion, animate } from "framer-motion";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Package,
   ReceiptText,
   BarChart,
-  BadgeDollarSign as BadgePoundSterling,
+  BadgeDollarSign as BadgeIcon,
 } from "lucide-react";
+
+// PDF generation imports
+import { jsPDF } from "jspdf";
+import "jspdf-autotable";
+
+// Import the barcode scanner component (cast as any for TS workarounds)
+import BarcodeScannerComponentImport from "react-qr-barcode-scanner";
+const BarcodeScannerComponent: any = BarcodeScannerComponentImport;
 
 // ------------------------------
 // Define interfaces for aggregated dashboard data
@@ -27,7 +53,7 @@ interface SaleTransaction {
   amount: number;
   date: string;
   status: string | null;
-  currency: "USD" | "EUR" | "GBP";
+  currency: "USD" | "EUR" | "GBP" | "PKR" | string;
   profit: number;
   vat: number;
 }
@@ -41,7 +67,7 @@ interface PurchaseTransaction {
   amount: number;
   date: string;
   status: string | null;
-  currency: "USD" | "EUR" | "GBP";
+  currency: "USD" | "EUR" | "GBP" | "PKR" | string;
   quantity?: number;
 }
 
@@ -53,23 +79,35 @@ interface DashboardData {
 }
 
 // ------------------------------
+// Define interface for business details
+// ------------------------------
+interface BusinessDetails {
+  businessName: string;
+  businessAddress: string;
+  businessEmail: string;
+  businessEIN: string;
+  businessVAT: string;
+  businessLogo: string;
+  returnPolicy: string;
+}
+
+// ------------------------------
 // Framer Motion variants for homepage fade-in
 // ------------------------------
+import { motion, animate } from "framer-motion";
 const homepageVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1 },
 };
 
 // ------------------------------
-// CountUp Component
+// CountUp Component (animates count)
 // ------------------------------
-// This component animates the count from 0 to the target value.
 const CountUp: React.FC<{ value: number; duration?: number }> = ({
   value,
   duration = 1.5,
 }) => {
   const [count, setCount] = useState(0);
-
   useEffect(() => {
     const controls = animate(0, value, {
       duration,
@@ -77,21 +115,20 @@ const CountUp: React.FC<{ value: number; duration?: number }> = ({
     });
     return () => controls.stop();
   }, [value, duration]);
-
   return <span>{count}</span>;
 };
 
 // ------------------------------
-// StatCard Component
+// StatCard Component (icon, title, animated number)
 // ------------------------------
-// Renders an icon, title, and an animated number.
 interface StatCardProps {
   title: string;
   value: number;
   icon: React.ElementType;
+  currencySymbol?: string;
 }
 
-const StatCard: React.FC<StatCardProps> = ({ title, value, icon: Icon }) => {
+const StatCard: React.FC<StatCardProps> = ({ title, value, icon: Icon, currencySymbol }) => {
   return (
     <motion.div
       className="p-4 border rounded-lg shadow-md text-center"
@@ -104,7 +141,7 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, icon: Icon }) => {
       </div>
       <h3 className="text-lg font-semibold">{title}</h3>
       <p className="text-2xl font-bold">
-        {title === "Total Profit" && "$"}
+        {currencySymbol ? currencySymbol : (title.includes("Profit") ? "$" : "")}
         <CountUp value={value} />
       </p>
     </motion.div>
@@ -112,12 +149,27 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, icon: Icon }) => {
 };
 
 // ------------------------------
+// Currency symbols mapping
+// ------------------------------
+const currencySymbols: { [key: string]: string } = {
+  USD: "$",
+  EUR: "€",
+  GBP: "£",
+  PKR: "₨",
+  INR: "₹",
+  CAD: "C$",
+};
+
+// ------------------------------
 // DashboardHomepage Component
 // ------------------------------
 export default function DashboardHomepage() {
+  const router = useRouter();
   const [data, setData] = useState<DashboardData | null>(null);
+  const [businessDetails, setBusinessDetails] = useState<BusinessDetails | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Fetch dashboard data
   useEffect(() => {
     async function fetchDashboard() {
       try {
@@ -126,7 +178,7 @@ export default function DashboardHomepage() {
         const dashboardData: DashboardData = await res.json();
         setData(dashboardData);
       } catch (error) {
-        console.error("Error:", error);
+        console.error("Dashboard error:", error);
       } finally {
         setLoading(false);
       }
@@ -134,14 +186,51 @@ export default function DashboardHomepage() {
     fetchDashboard();
   }, []);
 
+  // Fetch business details separately
+  useEffect(() => {
+    async function fetchBusiness() {
+      try {
+        const res = await fetch("/api/business");
+        if (!res.ok) throw new Error("Failed to fetch business details");
+        const details: BusinessDetails = await res.json();
+        setBusinessDetails(details);
+      } catch (error) {
+        console.error("Business error:", error);
+      }
+    }
+    fetchBusiness();
+  }, []);
+
   if (loading) return <p>Loading dashboard...</p>;
+
+  // If no business exists, show a centered placeholder with image and button.
+  if (!businessDetails || !businessDetails.businessName) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen">
+        <img
+          src="/404.png"
+          alt="No Business Found"
+          className="mx-auto mb-4 w-3/4 "
+        />
+        <p className="text-xl font-semibold mb-4">No Business Found</p>
+        <Link href="/dashboard/create">
+          <Button variant="default" className="px-6 py-3">
+            Create Business
+          </Button>
+        </Link>
+      </div>
+    );
+  }
+
   if (!data) return <p>No dashboard data available.</p>;
 
-  // Compute total profit from sale transactions
-  const totalProfit = data.saleTransactions.reduce(
-    (sum, tx) => sum + tx.profit,
-    0
-  );
+  // Compute total profit grouped by currency from sale transactions
+  const profitByCurrency = data.saleTransactions.reduce((acc, tx) => {
+    const curr = tx.currency;
+    if (!acc[curr]) acc[curr] = 0;
+    acc[curr] += tx.profit;
+    return acc;
+  }, {} as Record<string, number>);
 
   return (
     <motion.div
@@ -154,11 +243,11 @@ export default function DashboardHomepage() {
         <div>
           <h1 className="text-3xl font-bold">Dashboard</h1>
           <p>
-            Here is how your{" "}
-            <span className="text-green-500">Business</span> is doing
+            Here is how your <span className="text-green-500">Business</span> is doing
           </p>
         </div>
       </div>
+
       {/* Quick Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard
@@ -176,24 +265,27 @@ export default function DashboardHomepage() {
           value={data.quickStats.totalTransactions}
           icon={BarChart}
         />
-        <StatCard
-          title="Total Profit"
-          value={totalProfit}
-          icon={BadgePoundSterling}
-        />
+        {Object.entries(profitByCurrency).map(([curr, profit]) => (
+          <StatCard
+            key={curr}
+            title={`Total Profit (${curr})`}
+            value={profit}
+            icon={BadgeIcon}
+            currencySymbol={currencySymbols[curr] || ""}
+          />
+        ))}
       </div>
 
       {/* Low Stock Alerts Card */}
       <div className="p-4 border rounded-lg">
-        <h3 className="text-lg font-semibold mb-3 flex items-center gap-1">Low Stock Alerts <Package size={24} className="text-red-500"/></h3>
+        <h3 className="text-lg font-semibold mb-3 flex items-center gap-1">
+          Low Stock Alerts <Package size={24} className="text-red-500" />
+        </h3>
         <ul className="space-y-1">
           {data.stocks
             .filter((stock: any) => stock.quantity < 5)
             .map((stock: any) => (
-              <li
-                key={stock.id}
-                className="flex items-center space-x-2 text-sm"
-              >
+              <li key={stock.id} className="flex items-center space-x-2 text-sm">
                 <span>⚠️</span>
                 <span className="font-semibold text-md">
                   {stock.stockName || stock.name}
