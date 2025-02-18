@@ -55,6 +55,7 @@ export const StockSchema = z.object({
     .min(0, { message: "VAT must be a non-negative number" })
     .optional(),
   SKU: z.string().min(1, { message: "SKU is required" }),
+  stockImage: z.string().optional(),
 });
 
 export const invoiceSchema = z.object({
