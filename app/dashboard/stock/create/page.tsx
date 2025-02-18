@@ -14,7 +14,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SubmitButton } from "@/app/components/SubmitButtons";
 import { StockSchema } from "@/app/utils/zodSchema";
-import { Stock } from "@prisma/client";
 
 interface FormData {
   stockBarcode: string;
@@ -55,10 +54,13 @@ export default function CreateStockPage() {
     expiryDate: "",
     stockLocation: "",
   });
-  const [error, setError] = useState<string>("");
-  const [loading, setLoading] = useState<boolean>(false);
+  // State for image upload
+  const [stockImageUrl, setStockImageUrl] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  // Ensure generateSKU is defined before it's used.
+  // Generates a random SKU
   const generateSKU = () => {
     setFormData((prev) => ({
       ...prev,
@@ -74,9 +76,46 @@ export default function CreateStockPage() {
         type === "checkbox"
           ? checked
           : type === "number"
-            ? Number(value)
-            : value,
+          ? Number(value)
+          : value,
     }));
+  };
+
+  // Reuse your existing file upload function
+  const handleFileChange = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+
+    const formDataFile = new FormData();
+    formDataFile.append("file", file);
+    formDataFile.append(
+      "upload_preset",
+      process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "",
+    );
+
+    try {
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formDataFile,
+      });
+
+      const data = await res.json();
+
+      if (data.secure_url) {
+        setStockImageUrl(data.secure_url);
+      } else {
+        alert("Failed to upload image");
+      }
+    } catch (error) {
+      console.error("Upload error:", error);
+      alert("Error uploading file");
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
@@ -111,11 +150,17 @@ export default function CreateStockPage() {
       return;
     }
 
+    // Include the uploaded image URL (if available)
+    const stockPayload = {
+      ...parsedData.data,
+      stockImage: stockImageUrl,
+    };
+
     try {
       const res = await fetch("/api/stock", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(parsedData.data),
+        body: JSON.stringify(stockPayload),
       });
 
       if (!res.ok) throw new Error("Failed to create stock");
@@ -205,9 +250,9 @@ export default function CreateStockPage() {
           </div>
           <div className="grid md:grid-cols-2 gap-6 mb-6">
             <div>
-              <Label>Status</Label>
+              <Label>Status (In Stock or Out of Stock)</Label>
               <Input
-                name="status"
+                name="status "
                 value={formData.status}
                 onChange={handleChange}
                 placeholder="In Stock or Out of Stock"
@@ -218,7 +263,7 @@ export default function CreateStockPage() {
               <Label>Supplier</Label>
               <Input
                 name="supplier"
-                value={formData.supplier || ""}
+                value={formData.supplier}
                 onChange={handleChange}
                 placeholder="Supplier"
                 required
@@ -301,7 +346,7 @@ export default function CreateStockPage() {
               <Input
                 type="date"
                 name="purchaseDate"
-                value={formData.purchaseDate || ""}
+                value={formData.purchaseDate}
                 onChange={handleChange}
               />
             </div>
@@ -310,15 +355,33 @@ export default function CreateStockPage() {
               <Input
                 type="date"
                 name="expiryDate"
-                value={formData.expiryDate || ""}
+                value={formData.expiryDate}
                 onChange={handleChange}
               />
             </div>
           </div>
+          {/* File input for the stock image */}
+          <div className="mb-6">
+            <Label>Stock Image</Label>
+            <Input
+              type="file"
+              name="stockImage"
+              onChange={handleFileChange}
+              accept="image/*"
+            />
+            {isUploading && <p>Uploading...</p>}
+            {stockImageUrl && (
+              <img
+                src={stockImageUrl}
+                alt="Stock preview"
+                className="mt-2 h-20"
+              />
+            )}
+          </div>
           <div className="flex items-center justify-end mt-6">
             <SubmitButton
               text={loading ? "Adding..." : "Add Stock"}
-              disabled={loading}
+              disabled={loading || isUploading}
             />
           </div>
         </form>
