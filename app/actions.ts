@@ -89,6 +89,8 @@ export async function createStock(prevState: any, formData: FormData) {
     throw new Error("User ID is required");
   }
 
+  // Make sure your StockSchema includes:
+  // stockImage: z.string().optional()
   const submission = parseWithZod(formData, {
     schema: StockSchema,
   });
@@ -100,8 +102,8 @@ export async function createStock(prevState: any, formData: FormData) {
   const data = await prisma.stock.create({
     data: {
       id: submission.value.id,
-      stockBarcode: submission.value.stockBarcode, // Ensure this exists in the schema
-      stockName: submission.value.stockName, // Ensure this exists in the schema
+      stockBarcode: submission.value.stockBarcode,
+      stockName: submission.value.stockName,
       category: submission.value.category,
       subCategory: submission.value.subCategory,
       status: submission.value.status,
@@ -115,6 +117,8 @@ export async function createStock(prevState: any, formData: FormData) {
       discountAllowed: submission.value.discountAllowed,
       VAT: submission.value.VAT,
       SKU: submission.value.SKU,
+      // **Include the image URL here:**
+      stockImage: submission.value.stockImage,
       userId: session.user.id,
     },
   });
