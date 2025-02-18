@@ -20,13 +20,27 @@ import {
 import Link from "next/link";
 import { PlusIcon } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
-import { Stock } from "@/app/types/types"; // Ensure your Stock type is defined accordingly
+import { Stock } from "@/app/types/types"; // Ensure your Stock type includes `stockImage`
 import { StockActions } from "@/app/components/stockActions";
 
 // Helper function to format date as YYYY-MM-DD
 const formatDate = (date: string | null): string => {
   if (!date) return "";
   return date.split("T")[0];
+};
+
+// Helper function to construct the Cloudinary URL.
+// If the stored value is already a URL, we return it as is.
+const getCloudinaryImageUrl = (publicId: string): string => {
+  // Check if it's already a URL
+  if (publicId.startsWith("http")) return publicId;
+
+  const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+  if (!cloudName) {
+    console.error("Cloudinary cloud name is not set in environment variables.");
+    return publicId;
+  }
+  return `https://res.cloudinary.com/${cloudName}/image/upload/${publicId}`;
 };
 
 const StockList = () => {
@@ -97,6 +111,7 @@ const StockList = () => {
                 {[
                   "Barcode",
                   "Name",
+                  "Image",
                   "Category",
                   "SubCategory",
                   "Status",
@@ -128,19 +143,29 @@ const StockList = () => {
                   (stock.quantity ?? 0) < 5 ? "Out of Stock" : "In Stock";
                 return (
                   <TableRow key={index}>
-                    {[
-                      stock.stockBarcode,
-                      stock.stockName,
-                      stock.category,
-                      stock.subCategory,
-                    ].map((value, i) => (
-                      <TableCell
-                        key={i}
-                        className="px-3 py-2 text-center truncate max-w-[150px]"
-                      >
-                        {value}
-                      </TableCell>
-                    ))}
+                    <TableCell className="px-3 py-2 text-center truncate max-w-[150px]">
+                      {stock.stockBarcode}
+                    </TableCell>
+                    <TableCell className="px-3 py-2 text-center truncate max-w-[150px]">
+                      {stock.stockName}
+                    </TableCell>
+                    <TableCell className="px-3 py-2 text-center">
+                      {stock.stockImage ? (
+                        <img
+                          src={getCloudinaryImageUrl(stock.stockImage)}
+                          alt={stock.stockName}
+                          className="w-20 h-20 object-cover mx-auto"
+                        />
+                      ) : (
+                        "No Image"
+                      )}
+                    </TableCell>
+                    <TableCell className="px-3 py-2 text-center truncate max-w-[150px]">
+                      {stock.category}
+                    </TableCell>
+                    <TableCell className="px-3 py-2 text-center truncate max-w-[150px]">
+                      {stock.subCategory}
+                    </TableCell>
                     <TableCell className="px-3 py-2 text-center">
                       <Badge
                         className={
@@ -152,24 +177,24 @@ const StockList = () => {
                         {computedStatus}
                       </Badge>
                     </TableCell>
-                    {[
-                      stock.quantity,
-                      stock.stockRate,
-                      stock.sellingRate,
-                      stock.supplier,
-                    ].map((value, i) => (
-                      <TableCell key={i} className="px-3 py-2 text-center">
-                        {value}
-                      </TableCell>
-                    ))}
-                    {[
-                      formatDate(stock.purchaseDate),
-                      formatDate(stock.expiryDate),
-                    ].map((date, i) => (
-                      <TableCell key={i} className="px-3 py-2 text-center">
-                        {date}
-                      </TableCell>
-                    ))}
+                    <TableCell className="px-3 py-2 text-center">
+                      {stock.quantity}
+                    </TableCell>
+                    <TableCell className="px-3 py-2 text-center">
+                      {stock.stockRate}
+                    </TableCell>
+                    <TableCell className="px-3 py-2 text-center">
+                      {stock.sellingRate}
+                    </TableCell>
+                    <TableCell className="px-3 py-2 text-center">
+                      {stock.supplier}
+                    </TableCell>
+                    <TableCell className="px-3 py-2 text-center">
+                      {formatDate(stock.purchaseDate)}
+                    </TableCell>
+                    <TableCell className="px-3 py-2 text-center">
+                      {formatDate(stock.expiryDate)}
+                    </TableCell>
                     <TableCell className="px-3 py-2 text-center">
                       {stock.discount ? "Yes" : "No"}
                     </TableCell>
