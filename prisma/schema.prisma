@@ -186,28 +186,30 @@ model Todo {
 }
 
 model Stock {
-  id            String   @id @default(uuid())
-  stockBarcode  String   // Required field for stock ID
-  stockName     String   // Required field for stock name
-  category      String?
-  subCategory   String?
-  status        String?
-  quantity      Int?
-  stockRate     Float?
-  sellingRate   Float?
-  supplier      String?
-  purchaseDate  DateTime?
-  expiryDate    DateTime?
-  stockLocation String?
+  id              String   @id @default(uuid())
+  stockBarcode    String   // Required field for stock ID
+  stockName       String   // Required field for stock name
+  category        String?
+  subCategory     String?
+  status          String?
+  quantity        Int?
+  stockRate       Float?
+  sellingRate     Float?
+  supplier        String?
+  purchaseDate    DateTime?
+  expiryDate      DateTime?
+  stockLocation   String?
   discountAllowed Boolean? @default(false)
-  VAT           Float?
-  SKU           String   @unique // Required field for SKU
+  VAT             Float?
+  SKU             String   @unique // Required field for SKU
+  stockImage      String?  // Optional field to store the image URL
 
   // The Stock model still links to a User.
   // To associate stocks with a Business, you can filter by the User’s ownedBusiness.
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
+
 
 // ------------------------------
 // Invoice & InvoiceItem Models (with Organizational Enhancements)
