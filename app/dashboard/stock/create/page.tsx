@@ -252,7 +252,7 @@ export default function CreateStockPage() {
             <div>
               <Label>Status (In Stock or Out of Stock)</Label>
               <Input
-                name="status "
+                name="status"
                 value={formData.status}
                 onChange={handleChange}
                 placeholder="In Stock or Out of Stock"
