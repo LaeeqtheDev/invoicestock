@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -66,6 +66,12 @@ interface Stock {
 interface InvoiceItem {
   barcode: string;
   fetchedStock: Stock | null;
+  /** The user's typed stock name value */
+  stockNameInput: string;
+  /** Controls whether the suggestion dropdown is shown */
+  showSuggestions: boolean;
+  /** For keyboard navigation */
+  highlightedIndex: number;
   quantity: string;
   rate: string;
   vatPercent: string;
@@ -75,19 +81,15 @@ interface InvoiceItem {
 
 async function fetchStockByBarcode(barcode: string): Promise<Stock | null> {
   try {
-    console.log("Fetching stock for barcode:", barcode);
     const response = await fetch(`/api/stock`);
     if (!response.ok) {
       console.error("Error fetching stocks:", response.statusText);
       return null;
     }
     const stocks: Stock[] = await response.json();
-    console.log("Stocks returned:", stocks);
     const found = stocks.find((stock) => stock.stockBarcode === barcode);
     if (!found) {
       console.warn("Stock not found for barcode:", barcode);
-    } else {
-      console.log("Found stock:", found);
     }
     return found || null;
   } catch (error) {
@@ -133,8 +135,11 @@ export default function CreateInvoice() {
 
   // Client details.
   const [clientName, setClientName] = useState("");
-  const [clientEmail, setClientEmail] = useState("");
+  const [clientEmail, setClientEmail] = useState("business@invoicestock.online");
   const [clientAddress, setClientAddress] = useState("");
+
+  // Payment details.
+  const [amountPaid, setAmountPaid] = useState("");
 
   // Date state.
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
@@ -144,6 +149,9 @@ export default function CreateInvoice() {
     {
       barcode: "",
       fetchedStock: null,
+      stockNameInput: "",
+      showSuggestions: true,
+      highlightedIndex: 0,
       quantity: "",
       rate: "",
       vatPercent: "0",
@@ -154,6 +162,25 @@ export default function CreateInvoice() {
   // Barcode scanning modal state.
   const [isScanning, setIsScanning] = useState(false);
   const [scanningIndex, setScanningIndex] = useState<number | null>(null);
+
+  // Load the entire stock once for autocomplete.
+  const [allStocks, setAllStocks] = useState<Stock[]>([]);
+  useEffect(() => {
+    async function fetchAllStocks() {
+      try {
+        const response = await fetch("/api/stock");
+        if (response.ok) {
+          const stocks: Stock[] = await response.json();
+          setAllStocks(stocks);
+        } else {
+          console.error("Failed to fetch stocks");
+        }
+      } catch (error) {
+        console.error("Error fetching stocks:", error);
+      }
+    }
+    fetchAllStocks();
+  }, []);
 
   // Currency symbols mapping.
   const currencySymbols: { [key: string]: string } = {
@@ -173,7 +200,6 @@ export default function CreateInvoice() {
       let unique = false;
       let randomInvoice: number = 0;
       while (!unique) {
-        // Generate a random 4-digit number between 1000 and 9999.
         randomInvoice = Math.floor(1000 + Math.random() * 9000);
         const res = await fetch(
           `/api/invoice/check-unique?invoiceNumber=${randomInvoice}`
@@ -183,7 +209,7 @@ export default function CreateInvoice() {
           break;
         }
         const data = await res.json();
-        unique = data.unique; // Expecting { unique: true }
+        unique = data.unique;
       }
       if (unique) {
         setInvoiceNumber(randomInvoice);
@@ -199,8 +225,8 @@ export default function CreateInvoice() {
     async function fetchBusiness() {
       try {
         const details = await getBusinessDetails();
-        console.log("Fetched Business Details:", details);
         setBusinessDetails(details);
+        setClientAddress(details.businessAddress);
       } catch (error) {
         console.error("Error fetching business details:", error);
       }
@@ -213,9 +239,7 @@ export default function CreateInvoice() {
   // ------------------------------
   const updateInvoiceItem = (index: number, item: Partial<InvoiceItem>) => {
     setInvoiceItems((prev) =>
-      prev.map((invItem, i) =>
-        i === index ? { ...invItem, ...item } : invItem
-      )
+      prev.map((invItem, i) => (i === index ? { ...invItem, ...item } : invItem))
     );
   };
 
@@ -239,8 +263,11 @@ export default function CreateInvoice() {
           fetchedStock: stock,
           rate: stock.sellingRate.toString(),
           vatPercent: stock.VAT !== undefined ? stock.VAT.toString() : "0",
+          stockNameInput: stock.stockName,
           error: "",
+          quantity: "1",
         });
+        if (index === invoiceItems.length - 1) addInvoiceItem();
       }
     } else {
       updateInvoiceItem(index, {
@@ -261,6 +288,40 @@ export default function CreateInvoice() {
   };
 
   // ------------------------------
+  // Handler when a stock is selected via autocomplete.
+  // ------------------------------
+  const handleSelectStock = (index: number, selectedStock: Stock) => {
+    // Only set a default quantity if the stock is available.
+    if (selectedStock.quantity === 0) {
+      updateInvoiceItem(index, {
+        fetchedStock: null,
+        stockNameInput: selectedStock.stockName,
+        barcode: selectedStock.stockBarcode,
+        rate: "",
+        vatPercent: "0",
+        error: "Out of stock",
+        showSuggestions: false,
+        highlightedIndex: 0,
+        quantity: "",
+      });
+    } else {
+      updateInvoiceItem(index, {
+        fetchedStock: selectedStock,
+        stockNameInput: selectedStock.stockName,
+        barcode: selectedStock.stockBarcode,
+        rate: selectedStock.sellingRate.toString(),
+        vatPercent:
+          selectedStock.VAT !== undefined ? selectedStock.VAT.toString() : "0",
+        error: "",
+        showSuggestions: false,
+        highlightedIndex: 0,
+        quantity: "1", // Default quantity only when valid stock is found.
+      });
+      if (index === invoiceItems.length - 1) addInvoiceItem();
+    }
+  };
+
+  // ------------------------------
   // Add/Remove invoice item rows.
   // ------------------------------
   const addInvoiceItem = () => {
@@ -269,6 +330,9 @@ export default function CreateInvoice() {
       {
         barcode: "",
         fetchedStock: null,
+        stockNameInput: "",
+        showSuggestions: true,
+        highlightedIndex: 0,
         quantity: "",
         rate: "",
         vatPercent: "0",
@@ -289,8 +353,8 @@ export default function CreateInvoice() {
     const rate = Number(item.rate) || 0;
     const discount = Number(item.discount) || 0;
     const base = qty * rate;
-    const vat = (base * (Number(item.vatPercent) || 0)) / 100;
-    return base + vat - discount;
+    const gst = (base * (Number(item.vatPercent) || 0)) / 100;
+    return base + gst - discount;
   };
 
   const overallTotal = invoiceItems.reduce(
@@ -299,7 +363,14 @@ export default function CreateInvoice() {
   );
 
   // ------------------------------
-  // After Print Redirect (as a fallback listener).
+  // Display Payment Summary on the Form
+  // ------------------------------
+  const paidAmountNum = Number(amountPaid) || 0;
+  const changeReturned =
+    paidAmountNum > overallTotal ? paidAmountNum - overallTotal : 0;
+
+  // ------------------------------
+  // After Print Redirect.
   // ------------------------------
   useEffect(() => {
     const handleAfterPrint = () => {
@@ -310,18 +381,18 @@ export default function CreateInvoice() {
   }, [router]);
 
   // ------------------------------
-  // PDF Generation using jsPDF and autoTable for Receipt Printing.
+  // PDF Generation using jsPDF and autoTable.
   // ------------------------------
   const generatePDF = async () => {
-    // Increase the page height (from 200 to 250) to allow more space.
     const doc = new jsPDF({
       orientation: "portrait",
       unit: "mm",
-      format: [80, 200],
+      format: [80, 300],
     });
     const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
 
-    // Add business logo if available.
+    // Add logo if available.
     let logoBase64 = "";
     if (businessDetails.businessLogo) {
       try {
@@ -335,12 +406,9 @@ export default function CreateInvoice() {
       }
     }
 
-    // Header with business name and details.
-    const headerY = 5 + 25 + 5; // 35mm
+    const headerY = 5 + 25 + 5;
     doc.setFontSize(12);
-    doc.text(businessDetails.businessName, pageWidth / 2, headerY, {
-      align: "center",
-    });
+    doc.text(businessDetails.businessName, pageWidth / 2, headerY, { align: "center" });
     doc.setFontSize(10);
     doc.text(
       `EIN: ${businessDetails.businessEIN} VAT: ${businessDetails.businessVAT}`,
@@ -351,44 +419,61 @@ export default function CreateInvoice() {
     doc.setLineWidth(0.5);
     doc.line(5, headerY + 7, pageWidth - 5, headerY + 7);
 
-    // Invoice and client details.
     const detailsStartY = headerY + 10;
     doc.setFontSize(10);
     doc.text(`INV: ${invoiceNumber}`, 5, detailsStartY);
     doc.text(
-      new Intl.DateTimeFormat("en-US", { dateStyle: "short" }).format(
-        selectedDate
-      ),
+      new Intl.DateTimeFormat("en-US", { dateStyle: "short" }).format(selectedDate),
       pageWidth - 5,
       detailsStartY,
       { align: "right" }
     );
     doc.text(`CUR: ${currency}`, 5, detailsStartY + 4);
-    doc.text(`${clientName}`, pageWidth - 5, detailsStartY + 4, {
-      align: "right",
-    });
+    const displayClientName = clientName.trim() === "" ? "Walk In" : clientName;
+    doc.text(`${displayClientName}`, pageWidth - 5, detailsStartY + 4, { align: "right" });
     doc.line(5, detailsStartY + 6, pageWidth - 5, detailsStartY + 6);
 
-    // Invoice items table.
+    // Build table with headers: "Item", "Price", "Qty", "GST", "Amt"
     (doc as any).autoTable({
-      head: [["Item", "Qty", "Amt"]],
-      body: invoiceItems.map((item) => {
-        const stockName = item.fetchedStock?.stockName || "";
-        const quantity = item.quantity;
-        const amount = (Number(item.quantity) * Number(item.rate)).toFixed(2);
-        return [stockName, quantity, amount];
-      }),
+      head: [["Item", "Price", "Qty", "GST", "Amt"]],
+      body: invoiceItems
+        .filter((item) => item.fetchedStock !== null)
+        .map((item) => {
+          const qty = Number(item.quantity) || 0;
+          const price = Number(item.rate) || 0;
+          const base = qty * price;
+          const gstAmount = (base * (Number(item.vatPercent) || 0)) / 100;
+          const discount = Number(item.discount) || 0;
+          const amount = base + gstAmount - discount;
+          return [
+            item.fetchedStock?.stockName || "",
+            price.toFixed(2),      // No currency symbol
+            qty.toString(),
+            gstAmount.toFixed(2),  // No currency symbol
+            amount.toFixed(2),     // No currency symbol
+          ];
+        }),
       startY: detailsStartY + 8,
-      margin: { bottom: 10 },
+      margin: { left: 5, right: 5, bottom: 10 },
       theme: "plain",
+      headStyles: { fillColor: 200, textColor: 50, halign: "center" },
       styles: { fontSize: 8, cellPadding: 2 },
+      columnStyles: {
+        0: { cellWidth: 23 },
+        1: { cellWidth: 12, overflow: "visible", halign: "right" },
+        2: { cellWidth: 8, halign: "center" },
+        3: { cellWidth: 12, overflow: "visible", halign: "right" },
+        4: { cellWidth: 15, overflow: "visible", halign: "right" },
+      },
     });
 
-    const finalY = (doc as any).lastAutoTable
-      ? (doc as any).lastAutoTable.finalY
-      : detailsStartY + 8;
+    let finalY = (doc as any).lastAutoTable.finalY;
+    if (finalY + 40 > pageHeight) {
+      doc.addPage();
+      finalY = 10;
+    }
 
-    // Print the subtotal with extra spacing so it isn’t cut off.
+    // Render Subtotal, Amount Paid, and Change (with currency symbol)
     doc.setFontSize(8);
     doc.text(
       `Subtotal: ${currencySymbols[currency]}${overallTotal.toFixed(2)}`,
@@ -396,47 +481,44 @@ export default function CreateInvoice() {
       finalY + 10,
       { align: "right" }
     );
+    let newY = finalY + 16;
+    if (Number(amountPaid) > 0) {
+      doc.text(
+        `Paid Cash: ${currencySymbols[currency]}${Number(amountPaid).toFixed(2)}`,
+        pageWidth - 5,
+        newY,
+        { align: "right" }
+      );
+      newY += 6;
+      const change = Number(amountPaid) > overallTotal ? Number(amountPaid) - overallTotal : 0;
+      doc.text(
+        `Change: ${currencySymbols[currency]}${change.toFixed(2)}`,
+        pageWidth - 5,
+        newY,
+        { align: "right" }
+      );
+      newY += 6;
+    }
+    const returnPolicyY = newY + 6;
+    doc.text("Return Policy:", pageWidth / 2, returnPolicyY, { align: "center" });
+    const policyLines = doc.splitTextToSize(businessDetails.returnPolicy, pageWidth - 10);
+    doc.text(policyLines, pageWidth / 2, returnPolicyY + 4, { align: "center" });
 
-    // Return policy text.
-    const returnPolicyY = finalY + 16;
-    doc.setFontSize(8);
-    doc.text("Return Policy:", pageWidth / 2, returnPolicyY, {
-      align: "center",
-    });
-    const policyLines = doc.splitTextToSize(
-      businessDetails.returnPolicy,
-      pageWidth - 10
-    );
-    doc.text(policyLines, pageWidth / 2, returnPolicyY + 4, {
-      align: "center",
-    });
-
-    // Automatically trigger the print dialog.
     doc.autoPrint();
-
-    // Generate a blob URL instead of a data URI.
     const pdfBlobUrl = doc.output("bloburl");
-
-    // Open the PDF in a new window.
     const newWindow = window.open(pdfBlobUrl, "_blank");
     if (newWindow) {
       newWindow.focus();
-
-      // Attach an onafterprint event handler.
       newWindow.onafterprint = () => {
         newWindow.close();
         router.push("/dashboard/invoices");
       };
-
-      // Start an interval to check if the window has been closed.
       const printCheckInterval = setInterval(() => {
         if (newWindow.closed) {
           clearInterval(printCheckInterval);
           router.push("/dashboard/invoices");
         }
       }, 500);
-
-      // Call print on the new window after a slight delay to ensure the PDF loads.
       setTimeout(() => {
         newWindow.print();
       }, 500);
@@ -450,13 +532,12 @@ export default function CreateInvoice() {
   // ------------------------------
   async function handleCreateAndPrint(e: React.FormEvent) {
     e.preventDefault();
-
-    const validItems = invoiceItems.filter((item) => item.fetchedStock);
+    const validItems = invoiceItems.filter((item) => item.fetchedStock !== null);
     if (validItems.length === 0) {
       alert("Please add at least one valid invoice item with stock details.");
       return;
     }
-
+    const finalClientName = clientName.trim() === "" ? "Walk In" : clientName;
     const invoiceData = {
       invoiceName: `Invoice ${invoiceNumber}`,
       total: overallTotal,
@@ -465,11 +546,12 @@ export default function CreateInvoice() {
       fromName: businessDetails.businessName,
       fromEmail: businessDetails.businessEmail,
       fromAddress: businessDetails.businessAddress,
-      clientName,
+      clientName: finalClientName,
       clientEmail,
       clientAddress,
       currency,
       invoiceNumber: invoiceNumber,
+      amountPaid: amountPaid,
       invoiceItems: validItems.map((item) => ({
         stockid: item.fetchedStock!.id,
         invoiceItemQuantity: Number(item.quantity),
@@ -489,7 +571,6 @@ export default function CreateInvoice() {
         throw new Error("Failed to create invoice");
       }
       await res.json();
-
       for (const item of validItems) {
         if (item.fetchedStock) {
           const soldQuantity = Number(item.quantity);
@@ -501,13 +582,38 @@ export default function CreateInvoice() {
           });
         }
       }
-
-      // Generate and immediately print the PDF receipt.
       await generatePDF();
     } catch (error: any) {
       alert("Error: " + error.message);
     }
   }
+
+  // ------------------------------
+  // Handler for key press in the Stock Name autocomplete.
+  // ------------------------------
+  const handleStockNameKeyDown = (
+    e: KeyboardEvent<HTMLInputElement>,
+    index: number,
+    suggestions: Stock[]
+  ) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      const currentIndex = invoiceItems[index].highlightedIndex;
+      const newIndex = (currentIndex + 1) % suggestions.length;
+      updateInvoiceItem(index, { highlightedIndex: newIndex });
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      const currentIndex = invoiceItems[index].highlightedIndex;
+      const newIndex = (currentIndex - 1 + suggestions.length) % suggestions.length;
+      updateInvoiceItem(index, { highlightedIndex: newIndex });
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (suggestions.length > 0) {
+        handleSelectStock(index, suggestions[invoiceItems[index].highlightedIndex]);
+      }
+      updateInvoiceItem(index, { showSuggestions: false });
+    }
+  };
 
   // ------------------------------
   // Render Component
@@ -521,30 +627,18 @@ export default function CreateInvoice() {
             <div className="flex flex-col gap-2">
               <Label>Invoice No.</Label>
               <div className="flex items-center gap-2">
-                <span className="px-3 border border-r-0 rounded-l-md bg-muted">
-                  #
-                </span>
-                <Input
-                  type="number"
-                  value={invoiceNumber.toString()}
-                  readOnly
-                  className="rounded-l-none"
-                />
+                <span className="px-3 border border-r-0 rounded-l-md bg-muted">#</span>
+                <Input type="number" value={invoiceNumber.toString()} readOnly className="rounded-l-none" />
               </div>
             </div>
             <div className="flex flex-col gap-2">
               <Label>Currency</Label>
-              <Select
-                value={currency}
-                onValueChange={(value) => setCurrency(value)}
-              >
+              <Select value={currency} onValueChange={(value) => setCurrency(value)}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select Currency" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="USD">
-                    United States Dollar -- USD
-                  </SelectItem>
+                  <SelectItem value="USD">United States Dollar -- USD</SelectItem>
                   <SelectItem value="EUR">Euro -- EUR</SelectItem>
                   <SelectItem value="GBP">British Pound -- GBP</SelectItem>
                   <SelectItem value="PKR">Pakistani Rupee -- PKR</SelectItem>
@@ -567,21 +661,9 @@ export default function CreateInvoice() {
             </div>
             <div className="space-y-2">
               <Label>Client Details</Label>
-              <Input
-                placeholder="Client Name"
-                value={clientName}
-                onChange={(e) => setClientName(e.target.value)}
-              />
-              <Input
-                placeholder="Client Email"
-                value={clientEmail}
-                onChange={(e) => setClientEmail(e.target.value)}
-              />
-              <Input
-                placeholder="Client Address"
-                value={clientAddress}
-                onChange={(e) => setClientAddress(e.target.value)}
-              />
+              <Input placeholder="Client Name" value={clientName} onChange={(e) => setClientName(e.target.value)} />
+              <Input placeholder="Client Email" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} />
+              <Input placeholder="Client Address" value={clientAddress} onChange={(e) => setClientAddress(e.target.value)} />
             </div>
           </div>
 
@@ -590,23 +672,13 @@ export default function CreateInvoice() {
             <Label>Date</Label>
             <Popover>
               <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className="w-[280px] text-left justify-start"
-                >
+                <Button variant="outline" className="w-[280px] text-left justify-start">
                   <CalendarIcon className="mr-2" />
-                  {new Intl.DateTimeFormat("en-US", {
-                    dateStyle: "long",
-                  }).format(selectedDate)}
+                  {new Intl.DateTimeFormat("en-US", { dateStyle: "long" }).format(selectedDate)}
                 </Button>
               </PopoverTrigger>
               <PopoverContent>
-                <Calendar
-                  selected={selectedDate}
-                  onSelect={(date) => setSelectedDate(date || new Date())}
-                  mode="single"
-                  fromDate={new Date()}
-                />
+                <Calendar selected={selectedDate} onSelect={(date) => setSelectedDate(date || new Date())} mode="single" fromDate={new Date()} />
               </PopoverContent>
             </Popover>
           </div>
@@ -615,120 +687,95 @@ export default function CreateInvoice() {
           <div className="border p-4 mb-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-medium">Invoice Items</h3>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  type="button"
-                  onClick={addInvoiceItem}
-                >
-                  <PlusCircle className="mr-2 h-4 w-4" /> Add Product
-                </Button>
-              </div>
+              <Button variant="outline" type="button" onClick={addInvoiceItem}>
+                <PlusCircle className="mr-2 h-4 w-4" /> Add Product
+              </Button>
             </div>
             {invoiceItems.map((item, index) => {
               const itemTotal = computeItemTotal(item);
+              const suggestions = allStocks.filter((stock) =>
+                stock.stockName.toLowerCase().includes(item.stockNameInput.toLowerCase())
+              );
               return (
-                <div key={index} className="border rounded p-4 mb-4">
+                <div key={index} className="border rounded p-4 mb-4 relative">
                   <div className="grid md:grid-cols-4 gap-4 mb-4">
                     {/* Barcode Input & Buttons */}
                     <div className="space-y-2">
                       <Label>Barcode</Label>
-                      <Input
-                        value={item.barcode}
-                        onChange={(e) =>
-                          updateInvoiceItem(index, { barcode: e.target.value })
-                        }
-                        placeholder="Enter barcode"
-                      />
+                      <Input value={item.barcode} onChange={(e) => updateInvoiceItem(index, { barcode: e.target.value })} placeholder="Enter barcode" />
                       <div className="flex gap-2 mt-2">
-                        <Button
-                          variant="outline"
-                          type="button"
-                          size="sm"
-                          onClick={() => handleBarcodeLookup(index)}
-                        >
+                        <Button variant="outline" type="button" size="sm" onClick={() => handleBarcodeLookup(index)}>
                           Search Stock
                         </Button>
-                        <Button
-                          variant="outline"
-                          type="button"
-                          size="sm"
-                          onClick={() => handleScanBarcode(index)}
-                        >
+                        <Button variant="outline" type="button" size="sm" onClick={() => handleScanBarcode(index)}>
                           Scan Barcode
                         </Button>
                       </div>
-                      {item.error && (
-                        <p className="text-red-500 text-xs">{item.error}</p>
-                      )}
+                      {item.error && <p className="text-red-500 text-xs">{item.error}</p>}
                     </div>
-                    {/* Stock Name (read-only) */}
-                    <div className="space-y-2">
+                    {/* Stock Name Autocomplete */}
+                    <div className="space-y-2 relative">
                       <Label>Stock Name</Label>
                       <Input
-                        value={item.fetchedStock?.stockName || ""}
-                        placeholder="Stock Name"
-                        readOnly
+                        value={item.stockNameInput}
+                        onChange={(e) =>
+                          updateInvoiceItem(index, {
+                            stockNameInput: e.target.value,
+                            fetchedStock: null,
+                            showSuggestions: true,
+                          })
+                        }
+                        placeholder="Type to search..."
+                        onKeyDown={(e) => handleStockNameKeyDown(e, index, suggestions)}
                       />
+                      {item.stockNameInput && suggestions.length > 0 && item.showSuggestions && (
+                        <div className="absolute z-10 bg-white border w-full max-h-40 overflow-y-auto">
+                          {suggestions.map((stock, i) => (
+                            <div
+                              key={stock.id}
+                              className={`p-2 cursor-pointer hover:bg-gray-100 ${i === item.highlightedIndex ? "bg-gray-200" : ""}`}
+                              onMouseDown={() => handleSelectStock(index, stock)}
+                            >
+                              <p>{stock.stockName}</p>
+                              <p className="text-xs text-gray-600">Barcode: {stock.stockBarcode}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     {/* Quantity Input */}
                     <div className="space-y-2">
-                      <Label>Quantity</Label>
+                      <Label>Qty</Label>
                       <Input
                         type="number"
                         value={item.quantity}
                         onChange={(e) => {
                           const newQuantity = Number(e.target.value);
-                          const available = item.fetchedStock
-                            ? item.fetchedStock.quantity
-                            : Infinity;
+                          const available = item.fetchedStock ? item.fetchedStock.quantity : Infinity;
                           if (item.fetchedStock && newQuantity > available) {
-                            updateInvoiceItem(index, {
-                              error: "Quantity exceeds available stock",
-                            });
+                            updateInvoiceItem(index, { error: "Qty exceeds stock" });
                           } else {
-                            updateInvoiceItem(index, {
-                              quantity: e.target.value,
-                              error: "",
-                            });
+                            updateInvoiceItem(index, { quantity: e.target.value, error: "" });
                           }
                         }}
                         placeholder="0"
                       />
                     </div>
-                    {/* Rate Input (read-only) */}
+                    {/* Rate Input */}
                     <div className="space-y-2">
-                      <Label>Rate</Label>
-                      <Input
-                        type="number"
-                        value={item.rate}
-                        onChange={(e) =>
-                          updateInvoiceItem(index, { rate: e.target.value })
-                        }
-                        placeholder="0"
-                        readOnly={!!item.fetchedStock}
-                      />
+                      <Label>Price</Label>
+                      <Input type="number" value={item.rate} onChange={(e) => updateInvoiceItem(index, { rate: e.target.value })} placeholder="0" readOnly={!!item.fetchedStock} />
                     </div>
                   </div>
                   <div className="grid md:grid-cols-1 gap-4 mb-4">
                     <div className="space-y-2">
-                      <Label>Amount</Label>
-                      <Input
-                        value={`${currencySymbols[currency]}${itemTotal.toFixed(
-                          2
-                        )}`}
-                        readOnly
-                      />
+                      <Label>Amt</Label>
+                      <Input value={itemTotal.toFixed(2)} readOnly />
                     </div>
                   </div>
                   {invoiceItems.length > 1 && (
                     <div className="flex justify-end">
-                      <Button
-                        variant="destructive"
-                        type="button"
-                        size="sm"
-                        onClick={() => removeInvoiceItem(index)}
-                      >
+                      <Button variant="destructive" type="button" size="sm" onClick={() => removeInvoiceItem(index)}>
                         <Trash2 className="h-4 w-4 mr-1" /> Remove
                       </Button>
                     </div>
@@ -737,6 +784,33 @@ export default function CreateInvoice() {
               );
             })}
           </div>
+
+          {/* Payment Details Section */}
+          <div className="border p-4 mb-6">
+            <h3 className="text-lg font-medium">Payment Details</h3>
+            <div className="flex flex-col gap-2">
+              <Label>Amount Paid</Label>
+              <Input type="number" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} placeholder="0" />
+            </div>
+          </div>
+
+          {/* Payment Summary on the Form */}
+          {amountPaid !== "" && (
+            <div className="mt-4 border p-2">
+              <Label>Payment Summary</Label>
+              <p>
+                Paid Cash: {currencySymbols[currency]}
+                {Number(amountPaid).toFixed(2)}
+              </p>
+              <p>
+                Change Returned: {currencySymbols[currency]}
+                {(Number(amountPaid) > overallTotal
+                  ? Number(amountPaid) - overallTotal
+                  : 0
+                ).toFixed(2)}
+              </p>
+            </div>
+          )}
 
           {/* Overall Subtotal */}
           <div className="flex justify-end mb-6">
@@ -750,7 +824,7 @@ export default function CreateInvoice() {
             </div>
           </div>
 
-          {/* (Optional) Note Section */}
+          {/* Note Section */}
           <div className="mb-6">
             <Label>Note</Label>
             <Textarea placeholder="Add any additional notes here..." />
@@ -770,22 +844,14 @@ export default function CreateInvoice() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-4 rounded">
             <h2 className="text-lg font-bold mb-2">Scan Barcode</h2>
-            {/* Container with fixed dimensions to display the camera preview */}
             <div style={{ width: "400px", height: "300px" }}>
               <BarcodeScannerComponent
                 width={400}
                 height={300}
-                // onUpdate callback receives error and result.
                 onUpdate={(error: unknown, result: any) => {
                   if (result) {
-                    // Since result.text is a private property, cast to any to access it.
-                    const extractedNumber = (result as any)
-                      .text.replace(/\D/g, "");
-                    console.log("Scanned barcode number:", extractedNumber);
-                    updateInvoiceItem(scanningIndex, {
-                      barcode: extractedNumber,
-                      error: "",
-                    });
+                    const extractedNumber = (result as any).text.replace(/\D/g, "");
+                    updateInvoiceItem(scanningIndex, { barcode: extractedNumber, error: "" });
                     handleBarcodeLookup(scanningIndex);
                     setIsScanning(false);
                     setScanningIndex(null);
@@ -795,13 +861,7 @@ export default function CreateInvoice() {
                 }}
               />
             </div>
-            <Button
-              variant="destructive"
-              onClick={() => {
-                setIsScanning(false);
-                setScanningIndex(null);
-              }}
-            >
+            <Button variant="destructive" onClick={() => { setIsScanning(false); setScanningIndex(null); }}>
               Cancel
             </Button>
           </div>
