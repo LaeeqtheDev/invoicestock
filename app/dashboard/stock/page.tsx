@@ -68,7 +68,7 @@ const StockList = () => {
   }, []);
 
   const filteredData = data.filter((stock) =>
-    [stock.stockBarcode, stock.category, stock.subCategory, stock.status].some(
+    [stock.stockBarcode, stock.category, stock.subCategory, stock.stockName, stock.status].some(
       (field) => field?.toLowerCase().includes(searchTerm.toLowerCase())
     )
   );
