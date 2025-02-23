@@ -187,7 +187,7 @@ export default function CreateInvoice() {
     USD: "$",
     EUR: "€",
     GBP: "£",
-    PKR: "₨",
+    PKR: "Rs",
     INR: "₹",
     CAD: "C$",
   };
@@ -535,8 +535,8 @@ export default function CreateInvoice() {
   
     // ----- SUMMARY: Totals, Payment, and Return Policy -----
     // Increase right margin offset further and reduce font size for summary texts.
-    const summaryRightMargin = 20; // increased margin to push text further inward
-    doc.setFontSize(6); // reduced font size to help fit the text
+    const summaryRightMargin = 8; // increased margin to push text further inward
+    doc.setFontSize(10); // reduced font size to help fit the text
     const subtotalText = `Subtotal: ${currencySymbols[currency]}${overallTotal.toFixed(2)}`;
     doc.text(subtotalText, pageWidth - summaryRightMargin, finalY + 10, { align: "right" });
     
