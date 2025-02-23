@@ -384,29 +384,89 @@ export default function CreateInvoice() {
   // PDF Generation using jsPDF and autoTable.
   // ------------------------------
   const generatePDF = async () => {
-    const doc = new jsPDF({
-      orientation: "portrait",
-      unit: "mm",
-      format: [80, 300],
-    });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-
-    // Add logo if available.
+    // ----- LOGO HANDLING: "OBJECT CONTAIN" LOGIC -----
     let logoBase64 = "";
+    let computedLogoWidth = 25; // default max size
+    let computedLogoHeight = 25; // default max size
     if (businessDetails.businessLogo) {
       try {
         logoBase64 = await getBase64ImageFromUrl(businessDetails.businessLogo);
-        const logoWidth = 25;
-        const logoHeight = 25;
-        const logoX = (pageWidth - logoWidth) / 2;
-        doc.addImage(logoBase64, "PNG", logoX, 5, logoWidth, logoHeight);
+        const img = new Image();
+        img.src = businessDetails.businessLogo;
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+        });
+        const naturalWidth = img.width;
+        const naturalHeight = img.height;
+        const maxDimension = 25;
+        if (naturalWidth >= naturalHeight) {
+          computedLogoWidth = maxDimension;
+          computedLogoHeight = maxDimension * (naturalHeight / naturalWidth);
+        } else {
+          computedLogoHeight = maxDimension;
+          computedLogoWidth = maxDimension * (naturalWidth / naturalHeight);
+        }
       } catch (error) {
         console.error("Error loading logo image", error);
       }
     }
-
-    const headerY = 5 + 25 + 5;
+  
+    // ----- DYNAMIC PAGE HEIGHT CALCULATION -----
+    // Create a temporary document to estimate the return policy text height.
+    const tempDoc = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: [80, 80],
+    });
+    tempDoc.setFontSize(8);
+    const policyWidth = 80 - 10; // page width minus 5mm margins on each side
+    const policyLines = tempDoc.splitTextToSize(businessDetails.returnPolicy, policyWidth);
+    const lineHeight = 5; // using 5mm per line for return policy text
+    const policyTextHeight = policyLines.length * lineHeight;
+  
+    // Section height estimates:
+    // Header: top margin (5mm) + (logo height if available) + spacing (5mm) + header text (~10mm)
+    const headerHeight = 5 + (businessDetails.businessLogo ? computedLogoHeight : 0) + 5 + 10;
+    // Invoice details (invoice number, date, etc.)
+    const detailsSectionHeight = 10 + 6;
+    // Table: header (8mm) + each row (8mm per row)
+    const filteredItems = invoiceItems.filter((item) => item.fetchedStock !== null);
+    const tableHeaderHeight = 8;
+    const tableRowHeight = 8;
+    const tableHeight = tableHeaderHeight + (filteredItems.length * tableRowHeight);
+    // Summary: Fixed height for totals (16mm), plus return policy label and text.
+    const summaryFixedHeight = 16;
+    const returnPolicyLabelHeight = 6; // height for "Return Policy:" label
+    const extraReturnPolicySpacing = 4; // extra spacing before return policy text
+    const summaryHeight = summaryFixedHeight + returnPolicyLabelHeight + extraReturnPolicySpacing + policyTextHeight;
+  
+    // Total dynamic page height:
+    let dynamicPageHeight = headerHeight + detailsSectionHeight + tableHeight + summaryHeight;
+    dynamicPageHeight = Math.max(dynamicPageHeight, 80); // enforce a minimum page height
+  
+    // Create the jsPDF document with the dynamic page height.
+    const doc = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: [80, dynamicPageHeight],
+    });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+  
+    // ----- RENDER LOGO -----
+    if (logoBase64) {
+      try {
+        const logoX = (pageWidth - computedLogoWidth) / 2;
+        // Place logo 5mm from the top.
+        doc.addImage(logoBase64, "PNG", logoX, 5, computedLogoWidth, computedLogoHeight);
+      } catch (error) {
+        console.error("Error adding logo", error);
+      }
+    }
+  
+    // ----- HEADER: Business Details -----
+    const headerY = 5 + (businessDetails.businessLogo ? computedLogoHeight : 0) + 5;
     doc.setFontSize(12);
     doc.text(businessDetails.businessName, pageWidth / 2, headerY, { align: "center" });
     doc.setFontSize(10);
@@ -418,7 +478,8 @@ export default function CreateInvoice() {
     );
     doc.setLineWidth(0.5);
     doc.line(5, headerY + 7, pageWidth - 5, headerY + 7);
-
+  
+    // ----- INVOICE DETAILS -----
     const detailsStartY = headerY + 10;
     doc.setFontSize(10);
     doc.text(`INV: ${invoiceNumber}`, 5, detailsStartY);
@@ -430,29 +491,27 @@ export default function CreateInvoice() {
     );
     doc.text(`CUR: ${currency}`, 5, detailsStartY + 4);
     const displayClientName = clientName.trim() === "" ? "Walk In" : clientName;
-    doc.text(`${displayClientName}`, pageWidth - 5, detailsStartY + 4, { align: "right" });
+    doc.text(displayClientName, pageWidth - 5, detailsStartY + 4, { align: "right" });
     doc.line(5, detailsStartY + 6, pageWidth - 5, detailsStartY + 6);
-
-    // Build table with headers: "Item", "Price", "Qty", "GST", "Amt"
+  
+    // ----- INVOICE ITEMS TABLE -----
     (doc as any).autoTable({
       head: [["Item", "Price", "Qty", "GST", "Amt"]],
-      body: invoiceItems
-        .filter((item) => item.fetchedStock !== null)
-        .map((item) => {
-          const qty = Number(item.quantity) || 0;
-          const price = Number(item.rate) || 0;
-          const base = qty * price;
-          const gstAmount = (base * (Number(item.vatPercent) || 0)) / 100;
-          const discount = Number(item.discount) || 0;
-          const amount = base + gstAmount - discount;
-          return [
-            item.fetchedStock?.stockName || "",
-            price.toFixed(2),      // No currency symbol
-            qty.toString(),
-            gstAmount.toFixed(2),  // No currency symbol
-            amount.toFixed(2),     // No currency symbol
-          ];
-        }),
+      body: filteredItems.map((item) => {
+        const qty = Number(item.quantity) || 0;
+        const price = Number(item.rate) || 0;
+        const base = qty * price;
+        const gstAmount = (base * (Number(item.vatPercent) || 0)) / 100;
+        const discount = Number(item.discount) || 0;
+        const amount = base + gstAmount - discount;
+        return [
+          item.fetchedStock?.stockName || "",
+          price.toFixed(2),
+          qty.toString(),
+          gstAmount.toFixed(2),
+          amount.toFixed(2),
+        ];
+      }),
       startY: detailsStartY + 8,
       margin: { left: 5, right: 5, bottom: 10 },
       theme: "plain",
@@ -466,44 +525,40 @@ export default function CreateInvoice() {
         4: { cellWidth: 15, overflow: "visible", halign: "right" },
       },
     });
-
+  
     let finalY = (doc as any).lastAutoTable.finalY;
-    if (finalY + 40 > pageHeight) {
+    // If the content (including the summary) nears the bottom, add a new page.
+    if (finalY + summaryHeight > pageHeight) {
       doc.addPage();
       finalY = 10;
     }
-
-    // Render Subtotal, Amount Paid, and Change (with currency symbol)
-    doc.setFontSize(8);
-    doc.text(
-      `Subtotal: ${currencySymbols[currency]}${overallTotal.toFixed(2)}`,
-      pageWidth - 5,
-      finalY + 10,
-      { align: "right" }
-    );
+  
+    // ----- SUMMARY: Totals, Payment, and Return Policy -----
+    // Increase right margin offset further and reduce font size for summary texts.
+    const summaryRightMargin = 20; // increased margin to push text further inward
+    doc.setFontSize(6); // reduced font size to help fit the text
+    const subtotalText = `Subtotal: ${currencySymbols[currency]}${overallTotal.toFixed(2)}`;
+    doc.text(subtotalText, pageWidth - summaryRightMargin, finalY + 10, { align: "right" });
+    
     let newY = finalY + 16;
     if (Number(amountPaid) > 0) {
-      doc.text(
-        `Paid Cash: ${currencySymbols[currency]}${Number(amountPaid).toFixed(2)}`,
-        pageWidth - 5,
-        newY,
-        { align: "right" }
-      );
+      const paidText = `Paid Cash: ${currencySymbols[currency]}${Number(amountPaid).toFixed(2)}`;
+      doc.text(paidText, pageWidth - summaryRightMargin, newY, { align: "right" });
       newY += 6;
       const change = Number(amountPaid) > overallTotal ? Number(amountPaid) - overallTotal : 0;
-      doc.text(
-        `Change: ${currencySymbols[currency]}${change.toFixed(2)}`,
-        pageWidth - 5,
-        newY,
-        { align: "right" }
-      );
+      const changeText = `Change: ${currencySymbols[currency]}${change.toFixed(2)}`;
+      doc.text(changeText, pageWidth - summaryRightMargin, newY, { align: "right" });
       newY += 6;
     }
+    
     const returnPolicyY = newY + 6;
+    // Restore font size for the return policy title/text if desired.
+    doc.setFontSize(8);
     doc.text("Return Policy:", pageWidth / 2, returnPolicyY, { align: "center" });
-    const policyLines = doc.splitTextToSize(businessDetails.returnPolicy, pageWidth - 10);
+    // Render the return policy text using the pre-calculated lines.
     doc.text(policyLines, pageWidth / 2, returnPolicyY + 4, { align: "center" });
-
+  
+    // ----- PRINTING & POST-PRINT NAVIGATION -----
     doc.autoPrint();
     const pdfBlobUrl = doc.output("bloburl");
     const newWindow = window.open(pdfBlobUrl, "_blank");
@@ -526,7 +581,7 @@ export default function CreateInvoice() {
       alert("Popup blocked! Please allow popups for this website.");
     }
   };
-
+  
   // ------------------------------
   // Submission Handler.
   // ------------------------------
