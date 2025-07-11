@@ -1,7 +1,7 @@
 
 ---
 
-##`InvoiceStock`
+##  `InvoiceStock`
 
 ```md
 # 🧾 InvoiceStock
@@ -27,4 +27,3 @@ git clone https://github.com/LaeeqtheDev/invoicestock.git
 cd invoicestock
 npm install
 npm run dev
-
