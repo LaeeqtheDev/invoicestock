@@ -92,7 +92,7 @@ Visit [http://localhost:3000](http://localhost:3000) to access the app.
 
 Built by [Syed Laeeq Ahmed](https://www.linkedin.com/in/syed-laeeq-ahmed/)
 
-* 📬 Email: [laeeqthedev@icloud.com](mailto:laeeqthedev@icloud.com)  
+* 📬 Email: [laeeqahmed656@gmail.com](mailto:laeeqahmed656@gmail.com)  
 * 🧑‍💻 GitHub: [github.com/LaeeqtheDev](https://github.com/LaeeqtheDev)
 
 ---
