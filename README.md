@@ -1,7 +1,7 @@
 
 ---
 
-## ✅ 3. `InvoiceStock`
+##`InvoiceStock`
 
 ```md
 # 🧾 InvoiceStock
