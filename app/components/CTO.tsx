@@ -20,7 +20,7 @@ export function BusinessTestimonial() {
               </div>
               <div className="flex flex-col items-center text-center justify-center">
                 <h2 className="font-medium title-font mt-4 text-whit text-lg">
-                  Syed Laeeq Ahmed, CEO
+                  Edward Martin
                 </h2>
                 <div className="w-12 h-1 bg-white rounded mt-2 mb-4 text-center justify-center"></div>
                 <p className="text-base"></p>
